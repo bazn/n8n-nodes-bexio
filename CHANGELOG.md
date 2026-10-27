@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- **Fix:** the trigger for tasks and Task → Get Many failed with HTTP 500. bexio rejects any `order_by` on tasks and returns no `updated_at` for them (verified on a bexio sandbox). Task changes are now detected by poll time and a content fingerprint; Get Many no longer sorts tasks.
+- **Fix:** the supplier bill trigger checks that bexio really returns bills newest first. bexio accepts unknown sort fields with HTTP 200, so the previous fallback could not detect them and new bills could be missed.
+
 ## 0.1.0
 
 - First version
@@ -11,5 +16,3 @@
 - Credentials *Bexio API* (personal access token) and *Bexio OAuth2 API*
 - Rate-limited requests (HTTP 429) are retried
 - Node and credential icons use the official bexio logo
-- Task trigger and Task → Get Many work without `order_by`, which bexio rejects with HTTP 500 for tasks; task changes are detected by poll time and content fingerprint (verified on a bexio sandbox)
-- Supplier bill trigger verifies the sort order of bexio's answer instead of relying on an error for unsupported sort keys
