@@ -119,6 +119,7 @@ Choose the method under **Authentication** on the node.
 | **Note** | Create, Get, Get Many, Update, Delete |
 
 - Contacts are **companies** or **persons**: *Name / Last Name* is the company name or the last name, *First Name / Company Addition* the first name or the name addition.
+- **Task → Get Many** has no sort option: bexio answers HTTP 500 for any sort order on tasks. Tasks come back in bexio's default order.
 - Timesheets take a **duration** (`01:30`, `1:30` or minutes like `90`) on a date, or a **time range** with start and end.
 
 ### Other
@@ -151,18 +152,18 @@ The trigger keeps a **position** in the workflow's static data and only emits wh
 |---|---|---|
 | Contact, Invoice, Quote, Order → **Created** | id higher than the highest id seen | `POST …/search` with `id > last id`, oldest first |
 | Contact, Invoice, Quote, Order → **Created or Updated** | `updated_at` at or after the last one seen | `POST …/search` with `updated_at >= last value`, sorted by `updated_at` |
-| Task → **Created or Updated** | `updated_at` at or after the last one seen | as above, but tasks cannot be sorted by `updated_at`: the result is sorted locally |
+| Task → **Created or Updated** | changed since the previous poll, told apart by a content fingerprint | `POST /2.0/task/search` with `updated_at >= previous poll − 1 minute`, no sorting |
 | Expense → **Created** | `created_at` at or after the last one seen | `GET /4.0/expenses?created_at_start=…`, filtered by bexio |
-| Supplier Bill → **Created** | `created_at` at or after the last one seen | `GET /4.0/purchase/bills` sorted by `created_at` descending, page by page until a known bill appears |
+| Supplier Bill → **Created** | `created_at` at or after the last one seen | `GET /4.0/purchase/bills` sorted by `created_at` descending, page by page until a known bill appears; falls back to reading all bills (see below) |
 
-- **Starting point:** on activation nothing is emitted. Contacts, sales documents and tasks start at the newest existing record. Supplier bills and expenses (which have UUIDs instead of increasing ids) start at the current time of the n8n server.
+- **Starting point:** on activation nothing is emitted. Contacts and sales documents start at the newest existing record. Tasks, supplier bills and expenses start at the current time of the n8n server.
 - **No duplicates at the boundary:** records with exactly the same timestamp as the last poll are compared by id; ids already emitted at that timestamp are skipped. `updated_at` and `created_at` have second precision, so this matters when several records change within one second.
 - **Changing resource or event** resets the position: the trigger starts again from "now" and does not catch up on what happened before.
 - **Filters** are applied in the same request (status, contact type, user). A status filter checks the status **at the time of the poll**. A bill created as draft and booked before the next poll is therefore not emitted by *Status: Draft*.
 - **At most 1000 records per poll.** For contacts and sales documents, if more change between two polls, the oldest 1000 are emitted and the rest follow in the next poll. For tasks, supplier bills and expenses the API offers no matching sort order, so more than 1000 new or changed records within one interval can be missed. Choose a shorter poll interval if that many are expected.
-- **Supplier bill fallback:** the bexio API reference does not list which fields bills can be sorted by. If bexio rejects sorting by `created_at` (HTTP 400 or 422), the trigger remembers that and from then on reads all bills on each poll (narrowed by the status filter, at most 10,000) and compares `created_at` locally. This costs more requests on accounts with many bills; a status filter such as *Draft* keeps it small.
-- **Tasks:** because tasks cannot be sorted by `updated_at`, the newest change is determined from the 1000 most recent tasks. Changes to much older tasks are still found by the `updated_at` search on later polls.
-- **Times:** `updated_at` values are passed back to bexio exactly as bexio returned them, so no time zone conversion is involved. `created_at` of supplier bills and expenses is compared as an absolute time (with offset). A clock difference between n8n and bexio only matters for records created within that difference around the moment of activation.
+- **Supplier bill fallback:** the bexio API reference does not list which fields bills can be sorted by, and bexio answers HTTP 200 even for unknown sort fields. The trigger therefore checks that the bills really arrive newest first. If they do not (or bexio answers 400/422), it remembers that and from then on reads all bills on each poll (narrowed by the status filter, at most 10,000) and compares `created_at` locally. This costs more requests on accounts with many bills; a status filter such as *Draft* keeps it small.
+- **Tasks:** the task endpoints deviate from the API reference: any `order_by` makes bexio answer HTTP 500, and responses contain no `updated_at` although it can be searched. The trigger therefore searches for tasks changed since its previous poll (with one minute of overlap against clock differences) and stores a short fingerprint of each task's content. A task is emitted when it is new or its content differs from the last poll. Saving a task without changing anything does not update `updated_at` in bexio and emits nothing.
+- **Times:** bexio stores `updated_at` as Swiss local time (`YYYY-MM-DD HH:MM:SS`, no offset). Values read from bexio are passed back unchanged; the task trigger converts its own poll time to *Europe/Zurich*. `created_at` of supplier bills and expenses is compared as an absolute time (with offset). A clock difference between n8n and bexio only matters for records created within that difference around the moment of activation.
 - **Manual run** (*Fetch Test Event*): shows the records the active trigger has not delivered yet; if there are none, the newest record (supplier bills and expenses: the newest of the last 30 days). A manual run never moves the stored position.
 - **Rate limits:** like the node, the trigger waits and retries when bexio answers HTTP 429.
 

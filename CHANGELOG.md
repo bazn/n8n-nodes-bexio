@@ -11,3 +11,5 @@
 - Credentials *Bexio API* (personal access token) and *Bexio OAuth2 API*
 - Rate-limited requests (HTTP 429) are retried
 - Node and credential icons use the official bexio logo
+- Task trigger and Task → Get Many work without `order_by`, which bexio rejects with HTTP 500 for tasks; task changes are detected by poll time and content fingerprint (verified on a bexio sandbox)
+- Supplier bill trigger verifies the sort order of bexio's answer instead of relying on an error for unsupported sort keys

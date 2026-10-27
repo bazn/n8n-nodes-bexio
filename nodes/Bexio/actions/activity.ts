@@ -65,7 +65,8 @@ export async function executeTask(
 						: []),
 					...searchConditions.call(this, itemIndex),
 				],
-				{ order_by: this.getNodeParameter('orderBy', itemIndex, 'id_asc') },
+				// any order_by on tasks makes bexio answer HTTP 500 (verified on a sandbox)
+				{},
 				limitFor.call(this, itemIndex),
 			);
 		}

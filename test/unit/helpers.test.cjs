@@ -417,3 +417,46 @@ test('supplier bill trigger falls back to a full scan when sorting is rejected',
 	assert.equal(context.requests.length, 1);
 	assert.equal(context.requests[0].qs.sort, undefined);
 });
+
+test('supplier bill trigger detects an ignored sort order and scans all bills', async () => {
+	const base = Date.UTC(2026, 9, 27, 8);
+	const iso = (offsetMin) => at(new Date(base + offsetMin * 60_000).toISOString().slice(0, 19));
+	// bexio answers 200 but ascending: the oldest bill comes first
+	const unsorted = { data: [{ id: 'old', created_at: iso(-5) }, { id: 'new', created_at: iso(5) }], paging: { page: 1, page_count: 1 } };
+	const context = pollContext({ resource: 'bill' }, () => unsorted);
+	Object.assign(context.staticData, { key: 'bill:created', lastCreatedAt: base, lastUuids: [] });
+
+	const result = await new trigger.BexioTrigger().poll.call(context);
+	assert.deepEqual(result[0].map((item) => item.json.id), ['new']);
+	assert.equal(context.staticData.billSortUnsupported, true);
+	assert.equal(context.requests.length, 2);
+	assert.equal(context.requests[1].qs.sort, undefined);
+
+	assert.equal(trigger.isNewestFirst([{ created_at: iso(5) }, { created_at: iso(5) }, { created_at: iso(-1) }]), true);
+	assert.equal(trigger.isNewestFirst([{ created_at: iso(-1) }, { created_at: iso(5) }]), false);
+});
+
+test('task fingerprints change with the content only', () => {
+	const task = { id: 1, subject: 'test', info: 'a' };
+	assert.equal(trigger.taskFingerprint(task), trigger.taskFingerprint({ info: 'a', id: 1, subject: 'test' }));
+	assert.notEqual(trigger.taskFingerprint(task), trigger.taskFingerprint({ ...task, info: 'b' }));
+});
+
+test('task trigger never sends order_by and emits each change once', async () => {
+	let tasks = [{ id: 1, subject: 'test', info: 'a' }, { id: 2, subject: 'other', info: 'x' }];
+	const context = pollContext({ resource: 'task', event: 'updated' }, () => tasks);
+	const node = new trigger.BexioTrigger();
+
+	assert.equal(await node.poll.call(context), null); // activation remembers existing tasks
+	assert.equal(await node.poll.call(context), null);
+	tasks = [{ id: 1, subject: 'test', info: 'b' }, { id: 2, subject: 'other', info: 'x' }, { id: 3, subject: 'new', info: '' }];
+	assert.deepEqual((await node.poll.call(context))[0].map((item) => item.json.id), [1, 3]);
+	assert.equal(await node.poll.call(context), null);
+
+	for (const request of context.requests) {
+		assert.equal(request.qs.order_by, undefined);
+		assert.equal(request.url, 'https://api.bexio.com/2.0/task/search');
+		assert.match(request.body.at(-1).value, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+		assert.equal(request.body.at(-1).field, 'updated_at');
+	}
+});

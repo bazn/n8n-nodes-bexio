@@ -13,12 +13,14 @@ import { CONTACT_TYPES, DOCUMENT_KINDS, DOCUMENT_TYPES } from '../Bexio/constant
 import { authenticationProperty, bexioCredentials, userField } from '../Bexio/descriptions/shared';
 import {
 	bexioApiRequest,
+	bexioApiRequestAllItems,
 	bexioApiRequestAllPages,
 	buildSearch,
 	equalsCondition,
 	parseIdList,
 	type SearchCondition,
 	statusOf,
+	toBexioDateTime,
 } from '../Bexio/GenericFunctions';
 import { listSearch, loadOptions } from '../Bexio/methods';
 
@@ -35,7 +37,11 @@ interface PollState {
 	lastCreatedAt?: number;
 	/** UUIDs already emitted at `lastCreatedAt`. */
 	lastUuids?: string[];
-	/** Set once bexio rejected sorting supplier bills by `created_at`; the trigger then scans all bills. */
+	/** Start of the previous task poll (milliseconds). */
+	lastTaskCheck?: number;
+	/** Fingerprints of the tasks returned by the previous task poll, by id. */
+	taskFingerprints?: Record<string, string>;
+	/** Set once bexio did not sort supplier bills by `created_at`; the trigger then scans all bills. */
 	billSortUnsupported?: boolean;
 }
 
@@ -45,19 +51,16 @@ const V4_RESOURCES = ['bill', 'expense'];
 interface WatchSpec {
 	endpoint: string;
 	/** Whether the search endpoint accepts `id` as field and `updated_at` as sort key. */
-	searchById: boolean;
-	sortByUpdatedAt: boolean;
 }
 
 const WATCHED: Record<string, WatchSpec> = {
-	contact: { endpoint: '2.0/contact', searchById: true, sortByUpdatedAt: true },
+	contact: { endpoint: '2.0/contact' },
 	...Object.fromEntries(
 		DOCUMENT_KINDS.map((kind) => [
 			kind,
-			{ endpoint: `2.0/${DOCUMENT_TYPES[kind].path}`, searchById: true, sortByUpdatedAt: true },
+			{ endpoint: `2.0/${DOCUMENT_TYPES[kind].path}` },
 		]),
 	),
-	task: { endpoint: '2.0/task', searchById: false, sortByUpdatedAt: false },
 };
 
 const MAX_ITEMS_PER_POLL = 1000;
@@ -188,9 +191,10 @@ export class BexioTrigger implements INodeType {
 	async poll(this: IPollFunctions): Promise<INodeExecutionData[][] | null> {
 		const resource = this.getNodeParameter('resource') as string;
 		if (V4_RESOURCES.includes(resource)) return pollCreatedV4.call(this, resource);
+		if (resource === 'task') return pollTasks.call(this);
 		const event = this.getNodeParameter('event') as string;
 		const spec = WATCHED[resource];
-		const byId = event === 'created' && spec.searchById;
+		const byId = event === 'created';
 		const conditions = filterConditions(this.getNodeParameter('filters', {}) as IDataObject, resource);
 		const state = this.getWorkflowStaticData('node') as PollState;
 		const key = `${resource}:${event}`;
@@ -275,16 +279,11 @@ async function fetchNewest(
 	conditions: SearchCondition[],
 	byId: boolean,
 ): Promise<IDataObject | undefined> {
-	if (byId || spec.sortByUpdatedAt) {
-		const rows = await search.call(this, spec, conditions, {
-			order_by: byId ? 'id_desc' : 'updated_at_desc',
-			limit: 1,
-		});
-		return rows[0];
-	}
-	// tasks cannot be sorted by updated_at: take the newest change of the most recent tasks
-	const rows = await search.call(this, spec, conditions, { order_by: 'id_desc', limit: MAX_ITEMS_PER_POLL });
-	return rows.sort((left, right) => timestampKey(right.updated_at).localeCompare(timestampKey(left.updated_at)))[0];
+	const rows = await search.call(this, spec, conditions, {
+		order_by: byId ? 'id_desc' : 'updated_at_desc',
+		limit: 1,
+	});
+	return rows[0];
 }
 
 async function fetchNewById(
@@ -310,7 +309,7 @@ async function fetchUpdatedSince(
 		this,
 		spec,
 		[...conditions, { field: 'updated_at', value: state.lastTimestamp as string, criteria: '>=' }],
-		{ order_by: spec.sortByUpdatedAt ? 'updated_at_asc' : 'id_asc', limit: MAX_ITEMS_PER_POLL },
+		{ order_by: 'updated_at_asc', limit: MAX_ITEMS_PER_POLL },
 	);
 	rows.sort((left, right) => timestampKey(left.updated_at).localeCompare(timestampKey(right.updated_at)));
 	const seen = new Set(state.lastIds ?? []);
@@ -330,6 +329,11 @@ export function createdAtMs(value: unknown): number {
 /** Date-time in the format of the v4 filters (`2020-01-24T13:08:01+0000`). */
 export function v4DateTime(ms: number): string {
 	return new Date(ms).toISOString().replace(/\.\d{3}Z$/, '+0000');
+}
+
+/** Whether rows are ordered by `created_at`, newest first. */
+export function isNewestFirst(rows: IDataObject[]): boolean {
+	return rows.every((row, index) => index === 0 || createdAtMs(row.created_at) <= createdAtMs(rows[index - 1].created_at));
 }
 
 /** Rows created at or after `sinceMs`, oldest first. */
@@ -366,11 +370,16 @@ async function fetchBillsSince(this: IPollFunctions, sinceMs: number): Promise<I
 					page,
 				})) as { data?: IDataObject[]; paging?: { page_count?: number } };
 				const data = response.data ?? [];
+				// bexio answers 200 even for unknown sort keys (verified on a sandbox), so the order is checked
+				if (!isNewestFirst([...rows.slice(-1), ...data])) {
+					state.billSortUnsupported = true;
+					break;
+				}
 				rows.push(...data);
 				const reachedKnown = data.some((row) => createdAtMs(row.created_at) < sinceMs);
 				if (reachedKnown || data.length === 0 || page >= (response.paging?.page_count ?? page)) break;
 			}
-			return rows;
+			if (!state.billSortUnsupported) return rows;
 		} catch (error) {
 			const status = statusOf(error);
 			if (status !== 400 && status !== 422) {
@@ -426,4 +435,73 @@ async function pollCreatedV4(this: IPollFunctions, resource: string): Promise<IN
 		state.lastCreatedAt = newest;
 	}
 	return result.length ? [this.helpers.returnJsonArray(result)] : null;
+}
+
+// ---------------------------------------------------------------- Tasks
+
+/** Overlap of each task search with the previous one, covering clock differences between n8n and bexio. */
+const TASK_OVERLAP_MS = 60_000;
+
+/** bexio stores `updated_at` as Swiss wall-clock time (verified on a sandbox). */
+const BEXIO_TIME_ZONE = 'Europe/Zurich';
+
+/** Short content hash of a task, to tell a real change from a task that was already emitted. */
+export function taskFingerprint(row: IDataObject): string {
+	const text = JSON.stringify(Object.keys(row).sort().map((key) => [key, row[key]]));
+	let hash = 5381;
+	for (let index = 0; index < text.length; index++) hash = ((hash << 5) + hash + text.charCodeAt(index)) | 0;
+	return (hash >>> 0).toString(36);
+}
+
+/** Tasks whose `updated_at` is at or after `sinceMs`, by id. */
+async function fetchTasksSince(this: IPollFunctions, sinceMs: number): Promise<IDataObject[]> {
+	const conditions = filterConditions(this.getNodeParameter('filters', {}) as IDataObject, 'task');
+	const rows = await bexioApiRequestAllItems.call(
+		this,
+		'POST',
+		'2.0/task/search',
+		buildSearch([
+			...conditions,
+			{
+				field: 'updated_at',
+				value: toBexioDateTime(new Date(sinceMs).toISOString(), BEXIO_TIME_ZONE),
+				criteria: '>=',
+			},
+		]),
+		{},
+		MAX_ITEMS_PER_POLL,
+	);
+	return rows.sort((left, right) => (left.id as number) - (right.id as number));
+}
+
+/**
+ * Tasks cannot be sorted (any `order_by` makes bexio answer HTTP 500) and their responses carry no
+ * `updated_at`, although it can be searched (both verified on a sandbox). The trigger therefore
+ * searches by its own poll time and tells repeated tasks apart by a fingerprint of their content.
+ */
+async function pollTasks(this: IPollFunctions): Promise<INodeExecutionData[][] | null> {
+	const state = this.getWorkflowStaticData('node') as PollState;
+	const key = 'task:updated';
+	const hasPosition = state.key === key && state.lastTaskCheck !== undefined;
+	const now = Date.now();
+	const isNew = (row: IDataObject) => state.taskFingerprints?.[String(row.id)] !== taskFingerprint(row);
+
+	if (this.getMode() === 'manual') {
+		// Never moves the position: shows what the active trigger has not delivered yet, else a recent task.
+		if (hasPosition) {
+			const pending = (await fetchTasksSince.call(this, (state.lastTaskCheck as number) - TASK_OVERLAP_MS)).filter(isNew);
+			if (pending.length) return [this.helpers.returnJsonArray(pending)];
+		}
+		const recent = await fetchTasksSince.call(this, now - 30 * 24 * 3600_000);
+		return recent.length ? [this.helpers.returnJsonArray([recent[recent.length - 1]])] : null;
+	}
+
+	// First activation remembers the tasks of the overlap window, so they are not emitted on the next poll.
+	const since = hasPosition ? (state.lastTaskCheck as number) - TASK_OVERLAP_MS : now - TASK_OVERLAP_MS;
+	const rows = await fetchTasksSince.call(this, since);
+	const fresh = hasPosition ? rows.filter(isNew) : [];
+	state.key = key;
+	state.lastTaskCheck = now;
+	state.taskFingerprints = Object.fromEntries(rows.map((row) => [String(row.id), taskFingerprint(row)]));
+	return fresh.length ? [this.helpers.returnJsonArray(fresh)] : null;
 }

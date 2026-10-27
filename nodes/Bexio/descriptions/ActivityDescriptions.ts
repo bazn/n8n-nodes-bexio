@@ -4,7 +4,6 @@ import {
 	additionalJsonField,
 	contactField,
 	optionsField,
-	orderByField,
 	projectField,
 	returnAllFields,
 	searchConditionsField,
@@ -98,7 +97,6 @@ export const taskDescription: INodeProperties[] = [
 		],
 	},
 	searchConditionsField('task', { show: { resource: ['task'], operation: ['getAll'] } }),
-	orderByField(['id', 'finish_date'], { show: { resource: ['task'], operation: ['getAll'] } }),
 ];
 
 // ---------------------------------------------------------------- Note
