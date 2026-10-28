@@ -41,6 +41,7 @@
 - [Good to know](#good-to-know)
 - [Development](#development)
 - [Releasing](#releasing)
+- [Author](#author)
 - [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [License](#license)
 
 ## Installation
@@ -194,6 +195,12 @@ The code follows the structure of the n8n community node starter: `nodes/Bexio/d
 1. Update [CHANGELOG.md](CHANGELOG.md).
 2. `npm version <patch|minor|major>` and `git push --follow-tags`.
 3. The *Publish* workflow stages the version on npm and creates a GitHub release; approve the staged version on npmjs.com.
+
+## Author
+
+Built and maintained by **Dominik Vogt** ([LinkedIn](https://www.linkedin.com/in/dominik-vogt-2b070364/), [GitHub](https://github.com/bazn)).
+
+For bugs and feature requests, please [open an issue](https://github.com/bazn/n8n-nodes-bexio/issues).
 
 ## License
 

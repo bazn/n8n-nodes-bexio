@@ -15,7 +15,8 @@
   ],
   "author": {
     "name": "Dominik Vogt",
-    "email": "vogt.dom@gmail.com"
+    "email": "vogt.dom@gmail.com",
+    "url": "https://www.linkedin.com/in/dominik-vogt-2b070364/"
   },
   "scripts": {
     "build": "n8n-node build",
