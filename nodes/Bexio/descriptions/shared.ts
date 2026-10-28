@@ -141,14 +141,13 @@ export function searchConditionsField(endpoint: string, displayOptions: IDisplay
 				displayName: 'Condition',
 				name: 'condition',
 				values: [
-					// the first searchable field differs per endpoint, so the default cannot be a literal
-					// eslint-disable-next-line n8n-nodes-base/node-param-default-missing
+					// the searchable fields differ per endpoint, so the field has to be chosen
 					{
 						displayName: 'Field',
 						name: 'field',
 						type: 'options',
 						options: SEARCH_FIELDS[endpoint].map((field) => ({ name: field, value: field })),
-						default: SEARCH_FIELDS[endpoint][0],
+						default: '',
 					},
 					{
 						displayName: 'Criteria',

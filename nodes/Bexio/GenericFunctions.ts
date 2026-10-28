@@ -86,7 +86,7 @@ export async function bexioApiRequest(
 	body?: IDataObject | IDataObject[],
 	qs: IDataObject = {},
 	extra: Partial<IHttpRequestOptions> = {},
-): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+): Promise<unknown> {
 	const options: IHttpRequestOptions = {
 		method,
 		url: /^https?:\/\//i.test(endpoint) ? endpoint : `${BASE_URL}/${endpoint.replace(/^\/+/, '')}`,
@@ -412,7 +412,11 @@ export function equalsCondition(field: string, value: unknown): SearchCondition[
 /** Reads the "Search Conditions" fixed collection. */
 export function searchConditions(this: IExecuteFunctions, itemIndex: number): SearchCondition[] {
 	const raw = this.getNodeParameter('searchConditions', itemIndex, {}) as { condition?: SearchCondition[] };
-	return raw.condition ?? [];
+	const conditions = raw.condition ?? [];
+	if (conditions.some((condition) => !condition.field)) {
+		throw new NodeOperationError(this.getNode(), 'Choose a field for every search condition', { itemIndex });
+	}
+	return conditions;
 }
 
 /** Returns the limit for Get Many operations, or undefined when all results are requested. */

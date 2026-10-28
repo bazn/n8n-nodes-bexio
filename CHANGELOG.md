@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2
+
+- **Fix:** the package failed n8n's community package scan, which ignores `eslint-disable` comments. The field of a search condition now has to be chosen explicitly; a condition without a field gives a clear error.
+- **Fix:** API Request with *Split Array Responses Into Items* turned off still split arrays into items. The array is now returned in the field `data` of one item.
+
 ## 0.1.1
 
 - **Fix:** the trigger for tasks and Task → Get Many failed with HTTP 500. bexio rejects any `order_by` on tasks and returns no `updated_at` for them (verified on a bexio sandbox). Task changes are now detected by poll time and a content fingerprint; Get Many no longer sorts tasks.

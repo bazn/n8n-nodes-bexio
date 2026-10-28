@@ -201,8 +201,9 @@ export async function executeApiRequest(this: IExecuteFunctions, itemIndex: numb
 	}
 
 	const response = (await bexioApiRequest.call(this, method, endpoint, body, qs)) as unknown;
-	if (Array.isArray(response) && this.getNodeParameter('splitArray', itemIndex, true)) {
-		return response as IDataObject[];
+	if (Array.isArray(response)) {
+		// n8n turns a returned array into items, so an unsplit array has to be wrapped
+		return this.getNodeParameter('splitArray', itemIndex, true) ? (response as IDataObject[]) : { data: response as IDataObject[] };
 	}
 	if (response && typeof response === 'object') return response as IDataObject;
 	return { response: response ?? null } as IDataObject;

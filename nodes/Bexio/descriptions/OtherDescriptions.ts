@@ -257,7 +257,7 @@ export const apiRequestDescription: INodeProperties[] = [
 		name: 'splitArray',
 		type: 'boolean',
 		default: true,
-		description: 'Whether a response that is an array becomes one item per entry',
+		description: 'Whether a response that is an array becomes one item per entry. Otherwise the array is returned in the field "data" of one item.',
 		displayOptions: { show: { resource: ['apiRequest'] } },
 	},
 ];
