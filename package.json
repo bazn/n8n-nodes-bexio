@@ -1,6 +1,6 @@
 {
   "name": "@bazulu1/n8n-nodes-bexio",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "n8n nodes for bexio: contacts, invoices, quotes, orders, supplier bills, expenses, items, projects, timesheets, tasks, notes, files and users, plus a trigger for new and changed records",
   "license": "MIT",
   "homepage": "https://github.com/bazn/n8n-nodes-bexio#readme",

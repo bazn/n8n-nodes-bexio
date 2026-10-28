@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3
+
+- README: author section with contact links. No code changes.
+
 ## 0.1.2
 
 - **Fix:** the package failed n8n's community package scan, which ignores `eslint-disable` comments. The field of a search condition now has to be chosen explicitly; a condition without a field gives a clear error.
